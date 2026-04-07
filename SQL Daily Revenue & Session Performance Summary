@@ -1,0 +1,39 @@
+
+
+DECLARE start_date DATE DEFAULT '2024-01-01';
+DECLARE end_date DATE DEFAULT CURRENT_DATE();
+
+WITH base_events AS (
+    SELECT
+        event_date,
+        fiscal_year,
+        fiscal_month,
+        fiscal_week,
+        user_id,
+        session_id,
+        loyalty_flag,
+        order_id,
+        revenue
+    FROM `project.dataset.analytics_events`
+    WHERE event_date BETWEEN start_date AND end_date
+),
+
+daily_summary AS (
+    SELECT
+        event_date,
+        fiscal_year,
+        fiscal_month,
+        fiscal_week,
+        SUM(revenue) AS total_revenue,
+        COUNT(DISTINCT session_id) AS sessions,
+        COUNT(DISTINCT order_id) AS orders
+    FROM base_events
+    GROUP BY
+        event_date,
+        fiscal_year,
+        fiscal_month,
+        fiscal_week
+)
+
+SELECT *
+FROM daily_summary;
