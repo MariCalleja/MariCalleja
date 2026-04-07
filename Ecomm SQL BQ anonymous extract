@@ -1,0 +1,214 @@
+-- The following is an anonymous Ecomm BigQuery SQL hiding internal data
+
+WITH base_events AS (
+    SELECT
+        fiscal_year,
+        calendar_date,
+        fiscal_month,
+        fiscal_week,
+        weekday_num,
+        weekday_name,
+        session_id,
+        event_name,
+        event_action,
+        order_id,
+        order_count,
+        device_type,
+        auth_status,
+        revenue_amount,
+        page_id,
+        pageviews,
+        page_sequence,
+        engaged_flag,
+        category_path,
+        page_category,
+        page_subcategory,
+        item_quantity,
+        TRIM(initial_marketing_channel) AS initial_marketing_channel,
+        TRIM(initial_marketing_subchannel) AS initial_marketing_subchannel,
+        marketing_source_code,
+        marketing_program,
+        page_url,
+        checkout_flag,
+        payment_type
+    FROM `project.dataset.events_table`
+    WHERE
+        calendar_date BETWEEN '2024-03-25' AND '2024-04-28'
+        OR calendar_date BETWEEN '2025-03-24' AND '2025-04-27'
+),
+
+email_signup_flag AS (
+    SELECT
+        session_id,
+        MAX(
+            CASE 
+                WHEN page_category = 'NewsletterConfirmation' THEN 1
+                ELSE 0
+            END
+        ) AS email_signup_flag
+    FROM base_events
+    GROUP BY session_id
+),
+
+entry_page AS (
+    SELECT
+        session_id,
+        CASE
+            WHEN event_name = 'page_view'
+                 AND page_id IN ('PAGE_A', 'PAGE_B')
+                THEN 'PromotionPage'
+            WHEN event_name = 'page_view'
+                 AND REGEXP_CONTAINS(category_path, 'Promotion')
+                 AND page_category IN (
+                     'CAT0','CAT1','CAT2','CAT3','CAT4','CAT5','CAT6','Department'
+                 )
+                THEN 'Promotion'
+            ELSE page_category
+        END AS entry_page_category,
+        page_subcategory AS entry_page_subcategory
+    FROM base_events
+    WHERE page_sequence = 1
+),
+
+order_revenue AS (
+    SELECT
+        session_id,
+        order_id,
+        MAX(revenue_amount) AS order_revenue,
+        MAX(item_quantity) AS order_items
+    FROM base_events
+    WHERE event_name = 'purchase'
+    GROUP BY session_id, order_id
+),
+
+session_revenue AS (
+    SELECT
+        session_id,
+        SUM(order_revenue) AS session_revenue,
+        SUM(order_items) AS session_items
+    FROM order_revenue
+    GROUP BY session_id
+),
+
+session_summary AS (
+    SELECT
+        DISTINCT
+        e.fiscal_year,
+        e.calendar_date,
+        e.fiscal_week,
+        e.weekday_num,
+        e.weekday_name,
+        e.session_id,
+        e.initial_marketing_channel,
+        e.initial_marketing_subchannel,
+        ep.entry_page_category,
+        ep.entry_page_subcategory,
+
+        MAX(
+            CASE
+                WHEN e.device_type IN ('desktop', 'tablet', 'tv')
+                    THEN 'desktop'
+                ELSE 'mobile'
+            END
+        ) AS session_device,
+
+        MAX(CASE WHEN e.pageviews = 1 OR e.pageviews IS NULL THEN 1 ELSE 0 END) AS bounce_flag,
+        MAX(CASE WHEN e.engaged_flag = 1 THEN 1 ELSE 0 END) AS engaged_flag,
+        MAX(CASE WHEN e.page_sequence = 4 THEN 1 ELSE 0 END) AS fourth_page_flag,
+        MAX(CASE WHEN e.event_name = 'page_view'
+                     AND e.page_category IN (
+                         'CAT0','CAT1','CAT2','CAT3','CAT4','CAT5','CAT6',
+                         'Department','Search','PromoSearch','OrganicSearch'
+                     )
+                 THEN 1 ELSE 0 END) AS list_page_flag,
+        MAX(CASE WHEN e.event_name = 'view_item' THEN 1 ELSE 0 END) AS detail_page_flag,
+        MAX(CASE WHEN e.event_name = 'email_signup'
+                     AND e.event_action = 'success'
+                 THEN 1 ELSE 0 END) AS email_signup_event,
+        MAX(CASE WHEN e.event_name = 'account_registration' THEN 1 ELSE 0 END) AS account_signup_flag,
+        MAX(CASE WHEN e.auth_status = 'authenticated' THEN 1 ELSE 0 END) AS authenticated_flag,
+        MAX(CASE WHEN e.auth_status IN ('logged_in') THEN 1 ELSE 0 END) AS login_flag,
+        MAX(CASE WHEN e.event_name = 'add_to_cart' THEN 1 ELSE 0 END) AS add_to_cart_flag,
+        MAX(CASE WHEN e.order_id IS NOT NULL AND e.order_id <> 'unknown'
+                 THEN 1 ELSE 0 END) AS order_flag,
+
+        MAX(e.order_count) AS total_orders,
+        MAX(sr.session_revenue) AS session_revenue,
+        MAX(sr.session_items) AS session_items
+
+    FROM base_events e
+    LEFT JOIN entry_page ep ON e.session_id = ep.session_id
+    LEFT JOIN session_revenue sr ON e.session_id = sr.session_id
+    GROUP BY
+        e.fiscal_year,
+        e.calendar_date,
+        e.fiscal_week,
+        e.weekday_num,
+        e.weekday_name,
+        e.session_id,
+        e.initial_marketing_channel,
+        e.initial_marketing_subchannel,
+        ep.entry_page_category,
+        ep.entry_page_subcategory
+)
+
+SELECT
+    fiscal_year,
+    fiscal_week,
+    weekday_name,
+    calendar_date,
+    session_device,
+
+    CASE
+        WHEN initial_marketing_channel = 'Paid Media'
+             AND initial_marketing_subchannel = 'Generic'
+            THEN 'Generic Paid'
+        WHEN initial_marketing_channel = 'Paid Media'
+             AND initial_marketing_subchannel IN ('Brand', 'Brand Plus')
+            THEN 'Brand Paid'
+        WHEN initial_marketing_channel = 'Paid Media'
+             AND initial_marketing_subchannel = 'Shopping Ads'
+            THEN 'Shopping'
+        WHEN initial_marketing_channel = 'Direct'
+             OR initial_marketing_channel IS NULL
+            THEN 'Direct'
+        ELSE initial_marketing_channel
+    END AS marketing_channel,
+
+    initial_marketing_channel AS marketing_subchannel,
+    initial_marketing_subchannel AS marketing_detail,
+    entry_page_category,
+    entry_page_subcategory,
+
+    COUNT(DISTINCT ss.session_id) AS visits,
+    COUNT(DISTINCT CASE WHEN bounce_flag = 1 THEN ss.session_id END) AS bounce_sessions,
+    COUNT(DISTINCT CASE WHEN engaged_flag = 1 THEN ss.session_id END) AS engaged_sessions,
+    COUNT(DISTINCT CASE WHEN fourth_page_flag = 1 THEN ss.session_id END) AS fourth_page_sessions,
+    COUNT(DISTINCT CASE WHEN list_page_flag = 1 THEN ss.session_id END) AS list_page_sessions,
+    COUNT(DISTINCT CASE WHEN detail_page_flag = 1 THEN ss.session_id END) AS detail_page_sessions,
+    COUNT(DISTINCT CASE WHEN email_signup_event = 1 THEN ss.session_id END) AS email_signup_sessions,
+    SUM(es.email_signup_flag) AS confirmed_email_signups,
+    COUNT(DISTINCT CASE WHEN account_signup_flag = 1 THEN ss.session_id END) AS account_signups,
+    COUNT(DISTINCT CASE WHEN authenticated_flag = 1 THEN ss.session_id END) AS authenticated_sessions,
+    COUNT(DISTINCT CASE WHEN login_flag = 1 THEN ss.session_id END) AS logged_in_sessions,
+    COUNT(DISTINCT CASE WHEN add_to_cart_flag = 1 THEN ss.session_id END) AS add_to_cart_sessions,
+    COUNT(DISTINCT CASE WHEN order_flag = 1 THEN ss.session_id END) AS ordering_sessions,
+
+    ROUND(SUM(session_revenue), 0) AS total_revenue,
+    ROUND(SUM(session_items), 0) AS total_items,
+    ROUND(SUM(total_orders), 0) AS total_orders
+
+FROM session_summary ss
+LEFT JOIN email_signup_flag es
+    ON ss.session_id = es.session_id
+GROUP BY
+    fiscal_year,
+    calendar_date,
+    fiscal_week,
+    weekday_num,
+    weekday_name,
+    session_device,
+    initial_marketing_channel,
+    initial_marketing_subchannel,
+    entry_page_category,
+    entry_page_subcategory;
