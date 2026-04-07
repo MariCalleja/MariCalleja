@@ -1,4 +1,4 @@
-## 👋 Hola! I'm Mari and here you can know a bit about me and see some of my Viz projects.
+## 👋 Hi! I'm Mari and here you can know a bit about me and see some of my Viz projects.
 
 I’m a Marketing Data Analyst who enjoys turning complex data into clear, actionable insights that help teams make smarter decisions. My work focuses on eCommerce analytics, KPI measurement, A/B testing, and marketing performance, using tools such as SQL, BigQuery, Tableau, GA4, and advanced Excel. I currently support analytics initiatives that inform leadership reviews, budgeting, and cross‑functional planning, and I especially enjoy building dashboards that make data accessible and useful for everyone.
 
